@@ -46,9 +46,9 @@ export type GenerateBlogResponse = {
     reason: string;
   }[];
   socialContents: {
-    twitter: string[];
+    twitter: string;
     instagram: string;
-    linkedin: string;
+    threads: string;
   };
   imagePrompt: string;
 };
@@ -95,9 +95,9 @@ type RawGenerateBlogResponse = {
     reason: string;
   }[];
   socialContents: {
-    twitter: string[];
+    twitter: string;
     instagram: string;
-    linkedin: string;
+    threads: string;
   };
   imagePrompt: string;
 };
@@ -105,7 +105,6 @@ type RawGenerateBlogResponse = {
 const MODEL = "gpt-4.1-mini";
 const MIN_KEYWORDS = 8;
 const MAX_KEYWORDS = 10;
-const TWITTER_POST_COUNT = 3;
 
 const OPENAI_ERROR_MESSAGES: Record<
   Exclude<ApiErrorCode, "INVALID_JSON" | "INVALID_PAYLOAD" | "INTERNAL_SERVER_ERROR">,
@@ -187,9 +186,9 @@ const rawGenerateBlogResponseSchema: z.ZodType<RawGenerateBlogResponse> = z
     keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS),
     socialContents: z
       .object({
-        twitter: z.array(z.string().min(1).max(300)).max(TWITTER_POST_COUNT),
+        twitter: z.string().min(1).max(1200),
         instagram: z.string().min(1).max(1200),
-        linkedin: z.string().min(1).max(1500),
+        threads: z.string().min(1).max(1500),
       })
       .strict(),
     imagePrompt: z.string().min(1).max(600),
@@ -238,29 +237,9 @@ const generateBlogResponseSchema: z.ZodType<GenerateBlogResponse> = z
       }),
     socialContents: z
       .object({
-        twitter: z
-          .array(z.string().min(1).max(300))
-          .length(TWITTER_POST_COUNT)
-          .superRefine((items, ctx) => {
-            const seen = new Set<string>();
-
-            items.forEach((item, index) => {
-              const normalized = item.trim();
-
-              if (seen.has(normalized)) {
-                ctx.addIssue({
-                  code: z.ZodIssueCode.custom,
-                  message: "twitter 게시글은 서로 달라야 합니다.",
-                  path: [index],
-                });
-                return;
-              }
-
-              seen.add(normalized);
-            });
-          }),
+        twitter: z.string().min(1).max(1200),
         instagram: z.string().min(1).max(1200),
-        linkedin: z.string().min(1).max(1500),
+        threads: z.string().min(1).max(1500),
       })
       .strict(),
     imagePrompt: z.string().min(1).max(600),
@@ -373,24 +352,19 @@ const responseJsonSchema = {
       socialContents: {
         type: "object",
         additionalProperties: false,
-        required: ["twitter", "instagram", "linkedin"],
+        required: ["twitter", "instagram", "threads"],
         properties: {
           twitter: {
-            type: "array",
-            minItems: 1,
-            maxItems: 3,
-            items: {
-              type: "string",
-              minLength: 30,
-              maxLength: 280,
-            },
+            type: "string",
+            minLength: 80,
+            maxLength: 1200,
           },
           instagram: {
             type: "string",
             minLength: 80,
             maxLength: 1200,
           },
-          linkedin: {
+          threads: {
             type: "string",
             minLength: 120,
             maxLength: 1500,
@@ -468,8 +442,9 @@ function validateKoreanContent(data: GenerateBlogResponse) {
     ["blog.title", data.blog.title],
     ["blog.introduction", data.blog.introduction],
     ["blog.conclusion", data.blog.conclusion],
+    ["socialContents.twitter", data.socialContents.twitter],
     ["socialContents.instagram", data.socialContents.instagram],
-    ["socialContents.linkedin", data.socialContents.linkedin],
+    ["socialContents.threads", data.socialContents.threads],
     ["imagePrompt", data.imagePrompt],
   ];
 
@@ -487,10 +462,6 @@ function validateKoreanContent(data: GenerateBlogResponse) {
     );
   });
 
-  data.socialContents.twitter.forEach((post, index) => {
-    proseFields.push([`socialContents.twitter.${index}`, post]);
-  });
-
   const invalidPaths = proseFields
     .filter(([, value]) => !containsHangul(value))
     .map(([path]) => path);
@@ -504,23 +475,38 @@ function validateKoreanContent(data: GenerateBlogResponse) {
 
 function createSystemPrompt() {
   return [
-    "당신은 한국 SaaS 기업을 위한 퍼포먼스 마케팅 콘텐츠 전략가이자 숙련된 한국어 카피라이터다.",
-    "구조화된 사업 정보를 바탕으로 실제 서비스에 바로 활용 가능한 수준의 한국어 마케팅 블로그, 키워드 추천, 소셜 콘텐츠, 이미지 프롬프트를 만든다.",
+    "당신은 한국 시장에 강한 시니어 마케팅 카피라이터이자 SEO 전략가이며, 실제 전환을 만드는 롱폼 블로그를 자주 집필하는 숙련된 한국어 콘텐츠 디렉터다.",
+    "구조화된 사업 정보를 바탕으로 검색 유입, 신뢰 형성, 구매 검토를 동시에 고려한 고품질 한국어 블로그 콘텐츠, 추천 키워드, 소셜 콘텐츠, 이미지 프롬프트를 만든다.",
     "반드시 한국어로만 작성하되 브랜드명과 상품명은 입력된 원문 표기를 유지할 수 있다.",
-    "반드시 JSON만 반환하고, 마크다운 코드 펜스나 설명 문장을 포함하지 마라.",
+    "반드시 JSON만 반환하고, 마크다운 코드 펜스나 설명 문장, 사족, 메모를 포함하지 마라.",
     "출력은 제공된 JSON 스키마와 정확히 일치해야 하며 추가 필드를 만들지 마라.",
-    "문체는 자연스럽고 설득력 있어야 하며, 과장 광고, 번역투, 반복 패턴, AI 티 나는 문장을 피해야 한다.",
-    "도입부는 문제 제기 → 공감 → 해결책 흐름으로 작성하라.",
-    "결론은 CTA를 포함하되 과장되지 않게 작성하라.",
-    "키워드는 실시간 검색량 데이터가 아니라 실무적 추천 키워드다.",
-    "socialContents는 채널별 톤을 구분해서 작성하라.",
+    "핵심 목표는 짧은 요약이 아니라 실제 블로그처럼 읽히는 깊이 있는 장문 콘텐츠다.",
+    "문체는 자연스럽고 설득력 있어야 하며, 과장 광고, 번역투, 상투적 문장, 반복 패턴, AI 티 나는 표현을 피해야 한다.",
+    "문장을 매번 비슷하게 시작하지 말고 리듬을 바꿔라. 짧은 문장과 긴 문장을 적절히 섞고, 현실적인 상황 묘사와 구체적인 예시를 넣어라.",
+    "다음과 같은 얕고 단조로운 표현은 피하라: '이 제품은...', '많은 사람들이...', '효율적입니다', '도움이 됩니다' 같은 빈 문장.",
+    "독자가 실제로 겪는 상황, 망설이는 이유, 기존 방식의 피로감, 도입 후 기대되는 변화가 선명하게 느껴지도록 써라.",
+    "도입부는 문제 제기 → 공감 → 현실적인 상황 설명 → 해결책 예고 흐름으로 작성하라.",
+    "본문 섹션은 서로 역할이 겹치지 않게 전개하고, 문제 정의, 기존 대안의 한계, 상품 소개, 차별점, 기대 변화, 신뢰 또는 이벤트 중 적절한 흐름으로 구성하라.",
+    "각 섹션은 설명만 하지 말고 왜 중요한지, 어떤 장면에서 체감되는지, 어떤 선택 기준으로 이어지는지까지 풀어 써라.",
+    "결론은 핵심 가치를 다시 묶고 신뢰를 보강하며, 부담스럽지 않은 소프트 CTA로 마무리하라.",
+    "키워드는 실시간 검색량 데이터가 아니라 실무적 추천 키워드다. 중복 없이 다양하게 제시하라.",
+    "socialContents는 채널별 톤을 분명히 구분하라. 절대 한 줄 요약처럼 쓰지 말고, 그대로 복사해 게시할 수 있는 완성형 SNS 문안으로 작성하라.",
+    "Instagram은 실제 프로모션 캡션처럼 보여야 한다. 첫 줄은 자연스러운 이모지 훅으로 시작하고, 이어서 짧은 효익 중심 본문을 쓴 뒤, 이모지가 포함된 3~5개의 신뢰 또는 효익 포인트를 줄바꿈으로 정리하고, 부드러운 CTA와 5~10개의 해시태그로 마무리하라.",
+    "Instagram은 반드시 여러 줄로 작성하고, trustElements가 있으면 자연스럽게 녹이며, event가 있을 때만 혜택 문구를 포함하라. event가 없으면 존재하지 않는 이벤트를 만들지 마라.",
+    "Twitter는 배열이 아니라 하나의 멀티라인 게시글 문자열로 작성하라. 첫 줄은 이모지가 포함된 짧은 훅, 이어지는 2~3줄은 짧은 본문, 필요 시 1~2개의 효익 줄을 추가하고, 부드러운 CTA와 2~5개의 해시태그로 마무리하라.",
+    "Twitter는 반드시 여러 줄이어야 하며, 친구에게 추천하듯 친근하고 대화하듯 써라. 한 문장으로 끝내지 말고 실제 입력값을 반영하라.",
+    "Threads는 Twitter보다 조금 더 길고, 광고 문구보다 대화에 가까운 흐름으로 작성하라. 공감되는 도입, 문제나 맥락, 해결책 소개, 기대되는 변화, 부드러운 CTA를 자연스럽게 이어라.",
+    "Threads는 지나치게 판촉적이면 안 된다. 스토리텔링 느낌을 유지하고, 필요하면 2~5개의 해시태그를 덧붙여도 된다.",
     "imagePrompt는 별도 이미지 생성 API용 한국어 프롬프트이며 텍스트 삽입 지시는 포함하지 마라.",
+    "절대 요약하지 마라. 절대 불필요하게 압축하지 마라. 가능한 한 스키마의 길이 상한에 가깝게 풍부하게 작성하라.",
+    "초안을 만든 뒤 스스로 점검하라. 내용이 짧거나 섹션 수가 부족하거나 설명 밀도가 낮다면 내부적으로 더 확장한 후 최종 JSON만 반환하라.",
+    "특히 socialContents는 짧은 한 문장으로 끝내지 마라. 준비되지 않은 초안이 아니라 즉시 사용할 수 있는 게시글 품질로 완성하라.",
   ].join(" ");
 }
 
 function createUserPrompt(input: GenerateBlogRequest) {
   const lines = [
-    "다음 사업 정보를 기반으로 한국어 마케팅 블로그 콘텐츠를 생성하라.",
+    "다음 사업 정보를 기반으로 실제 블로그에 게시해도 어색하지 않은 수준의 한국어 롱폼 마케팅 콘텐츠를 생성하라.",
     "",
     "[사업 정보]",
     `브랜드명: ${input.brandName}`,
@@ -533,12 +519,42 @@ function createUserPrompt(input: GenerateBlogRequest) {
     `이벤트/프로모션: ${input.event ?? "미입력"}`,
     "",
     "[생성 기준]",
-    "1. blog.title은 SEO를 고려한 자연스러운 한국어 제목이어야 한다.",
-    "2. blog.introduction은 문제 제기 → 공감 → 해결책 흐름을 따라야 한다.",
-    "3. blog.sections는 3~5개이며 서로 중복 없이 논리적으로 전개해야 한다.",
-    "4. keywords는 실무형 추천 키워드로 작성하라.",
-    "5. twitter는 서로 다른 3개의 짧은 홍보 문구로 작성하라.",
-    "6. 모든 설명성 문장은 한국어로 작성하라.",
+    "1. blog.title은 SEO를 고려한 자연스러운 한국어 제목으로 작성하라.",
+    "브랜드명, 상품명, 핵심 효익이 자연스럽게 드러나야 하며 과도한 낚시 표현은 피하라.",
+    "2. blog.introduction은 150~250단어에 가깝게 충분히 길고 밀도 있게 작성하라.",
+    "문제 제기 → 공감 → 현실적인 상황 설명 → 해결책 예고 흐름을 지키고, 블로그 서론처럼 읽혀야 한다.",
+    "3. blog.sections는 반드시 4~5개로 작성하라.",
+    "각 섹션은 heading이 분명해야 하며, content는 150~300단어에 가깝게 충분히 길게 작성하라.",
+    "각 섹션에는 실제 업무나 일상에서 마주치는 장면, 구체적 설명, 독자가 체감할 이점이 함께 들어가야 한다.",
+    "섹션 전개는 다음 순서를 우선 참고하되 입력 정보에 맞게 자연스럽게 조정하라.",
+    "문제의 본질 → 기존 방식이 실패하는 이유 → 상품/서비스 소개 → 차별점의 실제 의미 → 도입 후 기대 변화 → 신뢰 요소 또는 이벤트.",
+    "4. 모든 본문은 문장 길이와 호흡을 다양하게 조절하라.",
+    "같은 구조를 반복하지 말고, 현실적인 사례, 망설임, 비교 포인트, 선택 이유를 섞어서 진짜 블로그처럼 써라.",
+    "5. conclusion은 120~200단어에 가깝게 작성하라.",
+    "핵심 가치를 다시 정리하고 신뢰를 강화하며, 부담스럽지 않은 CTA로 마무리하라.",
+    "6. keywords는 10개로 작성하라.",
+    "브랜드, 상품, 문제해결, 차별성, 신뢰, 이벤트 범주를 고르게 활용하고 중복 없이 현실적인 검색 의도를 반영하라.",
+    "7. socialContents 작성 기준:",
+    "twitter는 string 하나로 작성하라. 배열이 아니다.",
+    "twitter는 반드시 여러 줄의 완성형 게시글이어야 하며, 이모지가 포함된 훅 1줄, 짧은 본문 2~3줄, 필요 시 효익 줄 1~2개, 부드러운 CTA, 2~5개의 해시태그를 포함하라.",
+    "twitter는 친근하고 대화하듯 써야 하며, 한 줄 요약처럼 끝내지 마라.",
+    "instagram은 짧은 문장 하나가 아니라 실제 복붙 가능한 완성형 캡션으로 작성하라.",
+    "첫 줄은 이모지가 포함된 훅으로 시작하고, 이어서 효익 중심의 짧은 본문을 2~3줄 내외로 작성하라.",
+    "그 다음 줄바꿈 후, 이모지가 포함된 3~5개의 불릿형 포인트를 작성하라. 각 줄은 신뢰 요소, 차별점, 효익, 이벤트 중 실제 입력값에 맞는 내용을 반영하라.",
+    "trustElements가 있으면 불릿이나 본문에 자연스럽게 녹여라.",
+    "event가 있으면 불릿 또는 CTA 앞부분에 자연스럽게 녹여라. event가 없으면 혜택을 지어내지 마라.",
+    "마지막에는 부드러운 CTA 1~2문장을 넣고, 5~10개의 관련 해시태그를 별도 줄에 작성하라.",
+    "instagram은 반드시 여러 줄이어야 하며, 문맥 없이 짧게 끝내지 마라.",
+    "threads는 string 하나로 작성하라.",
+    "threads는 twitter보다 조금 더 길고, 대화형이며 자연스럽게 흐르는 멀티라인 게시글이어야 한다.",
+    "공감되는 시작 → 문제/맥락 → 해결책 소개 → 기대 효과 → 부드러운 CTA 순으로 자연스럽게 이어라.",
+    "threads는 광고 문구처럼 몰아붙이지 말고, 스토리텔링 느낌과 편안한 말투를 유지하라.",
+    "필요하면 마지막에 2~5개의 해시태그를 붙여도 되지만, 전체 톤을 해치지 않게 작성하라.",
+    "8. 모든 설명성 문장은 반드시 한국어로 작성하라.",
+    "9. 각 플랫폼에서 같은 문장을 재사용하지 마라. 구조와 톤을 플랫폼 특성에 맞게 분리하라.",
+    "10. socialContents는 요약본처럼 쓰지 마라. 한 줄 문구처럼 축약하지 마라. 그대로 게시 가능한 문장 완성도를 유지하라.",
+    "11. 최종 JSON을 반환하기 전, instagram, twitter, threads가 모두 여러 줄인지 스스로 다시 확인하라.",
+    "12. 각 socialContents 항목은 실제 입력값을 반영해야 하며, 입력되지 않은 신뢰 요소나 이벤트를 임의로 추가하지 마라.",
   ];
 
   return lines.join("\n");
@@ -692,52 +708,59 @@ function normalizeKeywords(
   return result.slice(0, MAX_KEYWORDS);
 }
 
-function createFallbackTwitterPosts(
+function createFallbackTwitterPost(
   request: GenerateBlogRequest,
   blogTitle: string,
 ) {
   return [
-    `${request.brandName}의 ${request.productName}, ${request.oneLineDescription}이 필요한 이유를 블로그로 정리했습니다. ${blogTitle}`,
-    `${request.industry}에서 더 분명한 선택 기준이 필요하다면 ${request.productName}의 차별점과 활용 포인트를 확인해 보세요.`,
-    `${request.productName} 도입을 고민 중이라면 기능 설명보다 중요한 건 실제 문제 해결력입니다. 핵심 내용을 한 번에 정리했습니다.`,
-  ].map((post) => post.slice(0, 280));
+    `✨ ${request.productName}, 지금 필요한 선택일까요?`,
+    "",
+    `${request.oneLineDescription}`,
+    `${request.industry}에서 더 분명한 기준이 필요할 때 참고할 포인트를 담았습니다.`,
+    "",
+    `💫 ${request.differentiation}`,
+    request.event ? `🎁 ${request.event}` : `✅ ${request.brandName}의 핵심 강점을 한 번에 확인해보세요.`,
+    "",
+    `${blogTitle} 지금 확인해보세요 👇`,
+    `#${request.brandName.replace(/\s+/g, "")} #${request.productName.replace(/\s+/g, "")} #${request.industry.replace(/\s+/g, "")}`,
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 1200);
 }
 
-function normalizeTwitterPosts(
-  twitter: string[],
+function createFallbackThreadsPost(
   request: GenerateBlogRequest,
-  blogTitle: string,
 ) {
-  const uniquePosts: string[] = [];
-  const seen = new Set<string>();
+  return [
+    `${request.industry} 관련해서 이것저것 비교해보다 보면, 결국 중요한 건 설명이 아니라 실제로 어떤 문제를 풀어주는지더라고요.`,
+    "",
+    `${request.productName}는 ${request.oneLineDescription}에 초점을 둔 선택지입니다.`,
+    `특히 ${request.differentiation} 같은 포인트는 검토 단계에서 꽤 크게 다가옵니다.`,
+    request.trustElements
+      ? `${request.trustElements} 같은 요소가 있다면 더 안심하고 살펴볼 이유가 생기고요.`
+      : `${request.brandName}가 어떤 기준으로 차별화를 만드는지 천천히 확인해볼 만합니다.`,
+    "",
+    `${request.productName}가 내 상황에 맞는지 부담 없이 살펴보는 것부터 시작해보세요.`,
+    `#${request.brandName.replace(/\s+/g, "")} #${request.productName.replace(/\s+/g, "")}`,
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 1500);
+}
 
-  for (const post of twitter) {
-    const normalized = post.trim();
+function normalizeSocialPost(
+  value: string,
+  fallback: string,
+  maxLength: number,
+) {
+  const normalized = value.trim();
 
-    if (!normalized || seen.has(normalized)) {
-      continue;
-    }
-
-    seen.add(normalized);
-    uniquePosts.push(normalized.slice(0, 280));
+  if (!normalized) {
+    return fallback.slice(0, maxLength);
   }
 
-  if (uniquePosts.length < TWITTER_POST_COUNT) {
-    for (const fallback of createFallbackTwitterPosts(request, blogTitle)) {
-      if (uniquePosts.length >= TWITTER_POST_COUNT) {
-        break;
-      }
-
-      if (seen.has(fallback)) {
-        continue;
-      }
-
-      seen.add(fallback);
-      uniquePosts.push(fallback);
-    }
-  }
-
-  return uniquePosts.slice(0, TWITTER_POST_COUNT);
+  return normalized.slice(0, maxLength);
 }
 
 function normalizeModelOutput(
@@ -756,13 +779,17 @@ function normalizeModelOutput(
     },
     keywords: normalizeKeywords(raw.keywords, request),
     socialContents: {
-      twitter: normalizeTwitterPosts(
+      twitter: normalizeSocialPost(
         raw.socialContents.twitter,
-        request,
-        raw.blog.title.trim(),
+        createFallbackTwitterPost(request, raw.blog.title.trim()),
+        1200,
       ),
       instagram: raw.socialContents.instagram.trim(),
-      linkedin: raw.socialContents.linkedin.trim(),
+      threads: normalizeSocialPost(
+        raw.socialContents.threads,
+        createFallbackThreadsPost(request),
+        1500,
+      ),
     },
     imagePrompt: raw.imagePrompt.trim(),
   };
@@ -847,7 +874,7 @@ export async function POST(request: Request) {
     const completion = await openai.chat.completions.create({
       model: MODEL,
       temperature: 0.8,
-      max_completion_tokens: 4_000,
+      max_completion_tokens: 8_000,
       response_format: {
         type: "json_schema",
         json_schema: responseJsonSchema,

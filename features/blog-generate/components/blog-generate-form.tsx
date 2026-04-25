@@ -11,14 +11,12 @@ import {
   DollarSign,
   FileText,
   Gift,
-  Image,
   LucideIcon,
   MessageSquare,
   Shield,
   Sparkle,
   Sparkles,
   Tag,
-  Upload,
 } from "lucide-react";
 import React from "react";
 import {
@@ -27,13 +25,19 @@ import {
   FieldValues,
   UseControllerProps,
   useForm,
+  useFormState,
 } from "react-hook-form";
 import {
   BlogGenerateFormValues,
   blogGenerateFormSchema,
-} from "./schema/blog-generate-schema";
+} from "../schema/blog-generate-schema";
+import BlogGenerateFormImageInput from "./blog-generate-form-image-input";
 
-function BlogGenerateForm() {
+interface BlogGenerateFormPrpos {
+  onSubmit: (formData: BlogGenerateFormValues) => void;
+}
+
+function BlogGenerateForm({ onSubmit }: BlogGenerateFormPrpos) {
   const form = useForm<BlogGenerateFormValues>({
     resolver: zodResolver(blogGenerateFormSchema),
     defaultValues: {
@@ -48,9 +52,9 @@ function BlogGenerateForm() {
     },
   });
 
-  const handleSubmit = (formData: BlogGenerateFormValues) => {
-    console.log(formData);
-  };
+  const { isValid, isSubmitting } = useFormState({
+    control: form.control,
+  });
 
   const brandInfoError = getSectionErrorMessage(form.formState.errors, [
     "brandName",
@@ -68,7 +72,7 @@ function BlogGenerateForm() {
   ]);
 
   return (
-    <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
       <BlogGenerateFormFieldWrapper
         error={Boolean(brandInfoError)}
         errorMessage={brandInfoError}
@@ -146,30 +150,7 @@ function BlogGenerateForm() {
           />
         </div>
 
-        <div className="space-y-2">
-          <BlogGenerageFormFieldLabel
-            icon={Image}
-            label="대표 사진"
-            htmlFor="image"
-          />
-          <label className="hover:bg-primary-900/30 border-primary flex-items-center bg-primary-900/20 flex cursor-pointer justify-center rounded-lg border-2 border-dashed p-5 transition-colors">
-            <div className="flex flex-col gap-2">
-              <div className="bg-primary/50 text-primary-300 mx-auto flex aspect-square size-10 items-center justify-center rounded-full">
-                <Upload className="size-4" />
-                <input className="hidden" type="file" multiple />
-              </div>
-
-              <div className="text-center">
-                <p className="text-primary-foreground font-semibold">
-                  이미지를 업로드해 주세요
-                </p>
-                <p className="text-xs text-gray-400">
-                  PNG, JPG, WEBP / 프론트 미리보기 전용
-                </p>
-              </div>
-            </div>
-          </label>
-        </div>
+        <BlogGenerateFormImageInput />
       </BlogGenerateFormFieldWrapper>
 
       <BlogGenerateFormFieldWrapper
@@ -212,6 +193,7 @@ function BlogGenerateForm() {
       </BlogGenerateFormFieldWrapper>
 
       <Button
+        disabled={!isValid || isSubmitting}
         type="submit"
         className="hover:bg-primary-400/90 flex h-12 w-full cursor-pointer items-center justify-center gap-2 shadow-2xl transition-colors"
       >
