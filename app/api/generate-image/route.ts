@@ -1,6 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { z } from "zod";
@@ -41,7 +40,6 @@ const MODEL = "gpt-4.1-mini";
 const IMAGE_MODEL = "gpt-image-1";
 const IMAGE_SIZE = "1024x1024";
 const IMAGE_QUALITY = "high";
-const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 
 const generateImageRequestSchema: z.ZodType<GenerateImageRequest> = z
   .object({
@@ -74,6 +72,14 @@ function getOpenAIClient() {
   }
 
   return openaiClient;
+}
+
+function getBlobToken() {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    throw new Error("BLOB_READ_WRITE_TOKEN is not configured.");
+  }
+
+  return process.env.BLOB_READ_WRITE_TOKEN;
 }
 
 function createErrorResponse(
@@ -204,7 +210,6 @@ async function enhancePrompt(openai: OpenAI, prompt: string) {
 }
 
 async function saveGeneratedImage(
-  request: Request,
   imageBase64: string,
 ): Promise<GenerateImageResponse> {
   let buffer: Buffer;
@@ -219,17 +224,19 @@ async function saveGeneratedImage(
     throw new Error("IMAGE_UPLOAD_FAILED");
   }
 
-  await mkdir(GENERATED_DIR, { recursive: true });
-
-  const filename = `${Date.now()}-${randomUUID()}.png`;
-  const absolutePath = path.join(GENERATED_DIR, filename);
-
-  await writeFile(absolutePath, buffer);
-
-  const origin = new URL(request.url).origin;
+  const blob = await put(
+    `generated/${Date.now()}-${randomUUID()}.png`,
+    buffer,
+    {
+      access: "public",
+      addRandomSuffix: false,
+      contentType: "image/png",
+      token: getBlobToken(),
+    },
+  );
 
   return {
-    imageUrl: `${origin}/generated/${filename}`,
+    imageUrl: blob.url,
   };
 }
 
@@ -278,7 +285,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await saveGeneratedImage(request, imageBase64);
+    const result = await saveGeneratedImage(imageBase64);
 
     return NextResponse.json<GenerateImageResponse>(result);
   } catch (error) {
@@ -290,6 +297,17 @@ export async function POST(request: Request) {
         500,
         "CONFIGURATION_ERROR",
         "OPENAI_API_KEY 환경 변수가 설정되어 있지 않습니다.",
+      );
+    }
+
+    if (
+      error instanceof Error &&
+      error.message === "BLOB_READ_WRITE_TOKEN is not configured."
+    ) {
+      return createErrorResponse(
+        500,
+        "CONFIGURATION_ERROR",
+        "BLOB_READ_WRITE_TOKEN 환경 변수가 설정되어 있지 않습니다.",
       );
     }
 
