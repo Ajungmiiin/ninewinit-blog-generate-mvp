@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Header from "@/components/layout/header";
 
 export const metadata: Metadata = {
   title: "나인위닛 AI 기반 블로그 자동화",
@@ -15,7 +14,6 @@ export default function RootLayout({
   return (
     <html lang="ko" className={`h-full`}>
       <body className="flex min-h-full flex-col">
-        <Header />
         <main className="flex-1 pt-20">{children}</main>
       </body>
     </html>
