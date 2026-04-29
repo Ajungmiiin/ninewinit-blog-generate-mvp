@@ -75,10 +75,10 @@ export default function Home() {
   };
 
   return (
-    <section className="flex min-h-[calc(100vh-var(--header-height))] items-center justify-center">
+    <section className="flex min-h-svh items-center justify-center">
       {generateBlogStatus !== "pending" &&
         (generateBlogStatus === "idle" || generateBlogStatus === "error") && (
-          <div className="w-full max-w-150 space-y-4 py-10">
+          <div className="w-full max-w-150 space-y-4">
             {generateBlogStatus === "error" && (
               <div className="border-primary-800 flex items-center justify-between rounded-xl border bg-white/2 p-4">
                 <div className="text-primary-foreground space-y-1">
